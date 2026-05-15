@@ -2,16 +2,6 @@
 
 把 MarginNote 学习集备份文件 `*.marginpkg` 转成 Obsidian 可用的 Markdown 笔记，并把图片作为附件导出。
 
-## 当前进度
-
-目前已经完成：
-
-- `marginpkg` 解包
-- 内部结构探测
-- 图片资源收集
-- Obsidian 输出目录脚手架
-
-等你把真实的 `marginpkg` 文件放进当前目录后，就可以继续把“正文、层级、图片嵌入”这部分适配完整。
 
 ## 用法
 
@@ -47,6 +37,4 @@ python .\mn_to_obsidian.py .\studyset.marginpkg --inspect-only
 - `第2章图形基元的显示/第2章图形基元的显示.md`
 - `第2章图形基元的显示/第2章图形基元的显示/`
 
-## 下一步
 
-把你的 `.marginpkg` 文件放到这个目录里，我就能直接继续适配真实内容导出。
