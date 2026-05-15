@@ -1,0 +1,5 @@
+__pycache__/
+build/
+obsidian_export/
+*.marginpkg
+*.marginnotes
