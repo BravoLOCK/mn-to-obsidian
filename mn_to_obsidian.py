@@ -193,8 +193,14 @@ def decode_media_blob(blob: bytes) -> bytes:
     payload = plistlib.loads(blob)
     if isinstance(payload, dict):
         objects = payload.get("$objects", [])
-        if len(objects) > 1 and isinstance(objects[1], bytes):
-            return objects[1]
+        if len(objects) > 1:
+            candidate = objects[1]
+            if isinstance(candidate, bytes):
+                return candidate
+            if isinstance(candidate, dict):
+                ns_data = candidate.get("NS.data")
+                if isinstance(ns_data, bytes):
+                    return ns_data
     if isinstance(payload, bytes):
         return payload
     raise ValueError("unsupported media blob format")
@@ -216,6 +222,15 @@ def guess_image_extension(data: bytes) -> str:
 
 def is_probably_image(data: bytes) -> bool:
     return guess_image_extension(data) != ".bin"
+
+
+def get_png_dimensions(data: bytes) -> tuple[int, int] | None:
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return (
+            int.from_bytes(data[16:20], "big"),
+            int.from_bytes(data[20:24], "big"),
+        )
+    return None
 
 
 def fetch_note_records(db_path: Path) -> dict[str, NoteRecord]:
@@ -295,11 +310,53 @@ def find_root_note(notes: dict[str, NoteRecord]) -> NoteRecord | None:
     return None
 
 
+def collect_exported_note_ids(root: NoteRecord, notes: dict[str, NoteRecord]) -> set[str]:
+    visited: set[str] = set()
+    stack = [root.note_id]
+
+    while stack:
+        note_id = stack.pop()
+        if note_id in visited:
+            continue
+        visited.add(note_id)
+        note = notes.get(note_id)
+        if note:
+            stack.extend(note.mindlinks)
+
+    return visited
+
+
+def select_note_media_ids(note: NoteRecord, media_map: dict[str, bytes]) -> list[str]:
+    media_ids = parse_media_ids(note.media_list)
+    if not media_ids:
+        return []
+
+    selected: list[str] = []
+    grouped_pngs: dict[tuple[int, int], list[tuple[str, int]]] = {}
+
+    for media_id in media_ids:
+        data = media_map.get(media_id)
+        if data is None or not is_probably_image(data):
+            continue
+        dims = get_png_dimensions(data)
+        if dims is None:
+            selected.append(media_id)
+            continue
+        grouped_pngs.setdefault(dims, []).append((media_id, len(data)))
+
+    for _, candidates in grouped_pngs.items():
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        selected.append(candidates[0][0])
+
+    return selected
+
+
 def export_note_tree_markdown(
     root: NoteRecord,
     notes: dict[str, NoteRecord],
     media_paths: dict[str, str],
-) -> str:
+    note_media_ids: dict[str, list[str]],
+) -> tuple[str, int]:
     lines: list[str] = []
     visited: set[str] = set()
 
@@ -317,7 +374,8 @@ def export_note_tree_markdown(
         title_plain = markdown_to_plain_text(note.title)
         highlight_plain = markdown_to_plain_text(note.highlight_text)
         notes_plain = markdown_to_plain_text(note.notes_text)
-        has_image_media = any(media_id in media_paths for media_id in parse_media_ids(note.media_list))
+        chosen_media_ids = note_media_ids.get(note.note_id, [])
+        has_image_media = any(media_id in media_paths for media_id in chosen_media_ids)
 
         # MarginNote often stores OCR'ed image text in highlight_text for image notes.
         # When a note has exported images, keep the image and suppress the OCR body.
@@ -330,7 +388,7 @@ def export_note_tree_markdown(
             lines.append(paragraph)
             lines.append("")
 
-        for media_id in parse_media_ids(note.media_list):
+        for media_id in chosen_media_ids:
             rel_path = media_paths.get(media_id)
             if rel_path:
                 lines.append(f"![[{rel_path}]]")
@@ -342,7 +400,7 @@ def export_note_tree_markdown(
                 render(child, depth + 1)
 
     render(root, 0)
-    return "\n".join(lines).strip() + "\n"
+    return "\n".join(lines).strip() + "\n", len(visited)
 
 
 def inspect_package(package_path: Path, unpack_dir: Path) -> PackageSummary:
@@ -512,8 +570,21 @@ def export_obsidian(summary: PackageSummary, output_dir: Path) -> None:
     attachments_dir = output_dir / attachment_dir_name
     ensure_dir(attachments_dir)
 
+    exported_note_ids = collect_exported_note_ids(root, notes)
+    exported_media_ids: set[str] = set()
+    note_media_ids: dict[str, list[str]] = {}
+    for note_id in exported_note_ids:
+        note = notes.get(note_id)
+        if note:
+            chosen_media_ids = select_note_media_ids(note, media_map)
+            note_media_ids[note_id] = chosen_media_ids
+            exported_media_ids.update(chosen_media_ids)
+
     media_paths: dict[str, str] = {}
-    for media_id, data in media_map.items():
+    for media_id in sorted(exported_media_ids):
+        data = media_map.get(media_id)
+        if data is None:
+            continue
         if not is_probably_image(data):
             continue
         ext = guess_image_extension(data)
@@ -522,7 +593,7 @@ def export_obsidian(summary: PackageSummary, output_dir: Path) -> None:
         target.write_bytes(data)
         media_paths[media_id] = f"{attachment_dir_name}/{filename}"
 
-    markdown = export_note_tree_markdown(root, notes, media_paths)
+    markdown, exported_note_count = export_note_tree_markdown(root, notes, media_paths, note_media_ids)
     note_filename = effective_name + ".md"
     (output_dir / note_filename).write_text(markdown, encoding="utf-8")
 
@@ -530,7 +601,8 @@ def export_obsidian(summary: PackageSummary, output_dir: Path) -> None:
         "# Export Summary",
         "",
         f"- Root note: `{root.title}`",
-        f"- Total notes loaded: `{len(notes)}`",
+        f"- Exported notes: `{exported_note_count}`",
+        f"- Total notes in database: `{len(notes)}`",
         f"- Media exported: `{len(media_paths)}`",
         f"- Export folder: `{output_dir.name}`",
         f"- Markdown file: `{note_filename}`",

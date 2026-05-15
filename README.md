@@ -2,7 +2,6 @@
 
 把 MarginNote 学习集备份文件 `*.marginpkg` 转成 Obsidian 可用的 Markdown 笔记，并把图片作为附件导出。
 
-
 ## 用法
 
 假设你的备份文件叫 `studyset.marginpkg`：
@@ -37,4 +36,11 @@ python .\mn_to_obsidian.py .\studyset.marginpkg --inspect-only
 - `第2章图形基元的显示/第2章图形基元的显示.md`
 - `第2章图形基元的显示/第2章图形基元的显示/`
 
+## 导出规则
+
+- 以学习集根节点为起点，按 MarginNote 的树结构递归导出
+- `Exported notes` 统计的是实际写入 Markdown 的节点数
+- `Media exported` 只统计这些已导出节点真正引用到的图片
+- 同一笔记里如果出现多张尺寸完全相同的 PNG，只保留体积最大的那张
+  这用于过滤 MarginNote 生成的批注/荧光笔痕迹图
 

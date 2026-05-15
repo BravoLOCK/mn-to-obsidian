@@ -3,3 +3,6 @@ build/
 obsidian_export/
 *.marginpkg
 *.marginnotes
+3.*/
+3_*/
+第*/
