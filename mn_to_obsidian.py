@@ -95,6 +95,16 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def is_marginnotes_database(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with path.open("rb") as handle:
+            return handle.read(16).startswith(b"SQLite format 3\x00")
+    except OSError:
+        return False
+
+
 def unpack_marginpkg(package_path: Path, unpack_dir: Path) -> None:
     if unpack_dir.exists():
         shutil.rmtree(unpack_dir)
@@ -404,9 +414,15 @@ def export_note_tree_markdown(
 
 
 def inspect_package(package_path: Path, unpack_dir: Path) -> PackageSummary:
-    unpack_marginpkg(package_path, unpack_dir)
-
     summary = PackageSummary(package_path=package_path, unpack_dir=unpack_dir)
+
+    if is_marginnotes_database(package_path):
+        summary.all_files.append(package_path)
+        summary.data_files.append(package_path)
+        summary.sqlite_summaries[package_path.name] = sniff_sqlite(package_path)
+        return summary
+
+    unpack_marginpkg(package_path, unpack_dir)
 
     for file_path in iter_files(unpack_dir):
         summary.all_files.append(file_path)
@@ -549,7 +565,7 @@ def export_stub(summary: PackageSummary, output_dir: Path) -> None:
 
 
 def export_obsidian(summary: PackageSummary, output_dir: Path) -> None:
-    db_path = find_marginnotes_db(summary)
+    db_path = summary.package_path if is_marginnotes_database(summary.package_path) else find_marginnotes_db(summary)
     if db_path is None:
         export_stub(summary, output_dir)
         return
@@ -647,7 +663,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace = args.workspace.resolve()
     effective_name = derive_effective_name(package_path)
     output = args.output.resolve() if args.output else (package_path.parent / effective_name)
-    unpack_dir = workspace / "unpacked"
+    unpack_dir = workspace / ("unpacked" if not is_marginnotes_database(package_path) else "direct")
     ensure_dir(workspace)
 
     summary = inspect_package(package_path, unpack_dir)

@@ -43,4 +43,5 @@ python .\mn_to_obsidian.py .\studyset.marginpkg --inspect-only
 - `Media exported` 只统计这些已导出节点真正引用到的图片
 - 同一笔记里如果出现多张尺寸完全相同的 PNG，只保留体积最大的那张
   这用于过滤 MarginNote 生成的批注/荧光笔痕迹图
+- 同时支持 `.marginpkg` 和单独的 `.marginnotes` 输入
 
